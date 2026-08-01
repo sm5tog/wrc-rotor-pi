@@ -432,6 +432,12 @@ class RotorApp(tk.Tk):
 
     # ── Dynamic drawing ───────────────────────────────────
 
+    def _label_offset(self, degrees, base):
+        # Flip the label to the opposite half from its own needle, so text
+        # never sits on the needle it belongs to (or the other one).
+        rad = math.radians(degrees - 90)
+        return -base if math.sin(rad) > 0 else base
+
     def _needle(self, degrees, color, length_frac, width):
         cx = cy = self._cx
         rad = math.radians(degrees - 90)
@@ -454,31 +460,42 @@ class RotorApp(tk.Tk):
 
         cx = cy = self._cx
         R = self._radius
+        sr = self._stop_r
         if self._is_compact:
             fsz_az, fsz_tgt = max(10, R // 9), max(8, R // 13)
-            y_actual, y_target = R * 0.27, R * 0.42
+            off_actual, off_target = R * 0.27, R * 0.42
         else:
             fsz_az, fsz_tgt = max(12, R // 8), max(10, R // 11)
-            y_actual, y_target = R * 0.48, R * 0.63
+            off_actual, off_target = R * 0.48, R * 0.63
+
+        # Keep the digits clear of the stop ring, which always renders on
+        # top of everything else.
+        off_actual = max(off_actual, sr + fsz_az * 0.7)
+        off_target = max(off_target, off_actual + fsz_tgt * 1.3)
 
         if self.az_target is not None:
             self.needle_target = self._needle(self.az_target, AMBER, 0.74, 2)
 
         if self.az_actual is not None:
             self.needle_actual = self._needle(self.az_actual, GREEN, 0.87, max(3, R // 50))
+            y = self._label_offset(self.az_actual, off_actual)
             self.label_actual_deg = self.canvas.create_text(
-                cx, cy + y_actual,
+                cx, cy + y,
                 text=f"{int(self.az_actual)}°",
                 fill=GREEN, font=("Consolas", fsz_az, "bold"))
 
         if self.az_target is not None:
+            y = self._label_offset(self.az_target, off_target)
             self.label_target_deg = self.canvas.create_text(
-                cx, cy + y_target,
+                cx, cy + y,
                 text=f"→ {int(self.az_target)}°",
                 fill=AMBER, font=("Consolas", fsz_tgt))
 
         self.canvas.tag_raise(self.stop_circle)
         self.canvas.tag_raise(self.stop_label)
+        for item in (self.label_actual_deg, self.label_target_deg):
+            if item:
+                self.canvas.tag_raise(item)
 
     # ── Mouse click ───────────────────────────────────────
 
