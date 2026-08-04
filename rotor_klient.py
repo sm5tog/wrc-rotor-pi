@@ -280,9 +280,13 @@ class SettingsDialog(tk.Toplevel):
             daemon=True).start()
 
     def _on_result(self, ok):
-        self.after(0, lambda: self.lbl_status.config(
-            text="● Connected!" if ok else "● Failed.",
-            fg=GREEN if ok else RED))
+        def update():
+            if not self.winfo_exists():
+                return
+            self.lbl_status.config(
+                text="● Connected!" if ok else "● Failed.",
+                fg=GREEN if ok else RED)
+        self.after(0, update)
 
 
 # ── Main app ───────────────────────────────────────────────
