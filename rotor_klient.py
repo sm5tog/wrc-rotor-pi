@@ -15,6 +15,8 @@ import os
 import sys
 import webbrowser
 
+import win_snap
+
 if getattr(sys, 'frozen', False):
     _BASE_DIR = os.path.dirname(sys.executable)
 else:
@@ -56,10 +58,13 @@ def load_settings():
                 "port":    int(d.get("port", DEFAULT_PORT)),
                 "ui_mode": ui_mode,
                 "size":    int(d.get("size", SIZE_BY_MODE[ui_mode]["default"])),
+                "x":       d.get("x"),
+                "y":       d.get("y"),
             }
     except Exception:
         return {"host": DEFAULT_HOST, "port": DEFAULT_PORT,
-                "ui_mode": DEFAULT_UI_MODE, "size": SIZE_BY_MODE[DEFAULT_UI_MODE]["default"]}
+                "ui_mode": DEFAULT_UI_MODE, "size": SIZE_BY_MODE[DEFAULT_UI_MODE]["default"],
+                "x": None, "y": None}
 
 def save_settings(s):
     with open(CONFIG_FILE, "w") as f:
@@ -312,6 +317,10 @@ class RotorApp(tk.Tk):
 
         self._apply_window_style()
         self._build_ui()
+        if self._cfg.get("x") is not None and self._cfg.get("y") is not None:
+            self.geometry(f"+{self._cfg['x']}+{self._cfg['y']}")
+        self.attributes("-topmost", True)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ── Geometry ──────────────────────────────────────────
 
@@ -517,11 +526,18 @@ class RotorApp(tk.Tk):
         if abs(dx) > 5 or abs(dy) > 5:
             self._moved = True
         if self._moved:
-            self.geometry(f"+{self._win_origin[0] + dx}+{self._win_origin[1] + dy}")
+            x = self._win_origin[0] + dx
+            y = self._win_origin[1] + dy
+            x, y = win_snap.snap(self.title(), x, y, self.winfo_width(), self.winfo_height())
+            self.geometry(f"+{x}+{y}")
 
     def _on_release(self, event):
         if not self._moved:
             self._handle_click(event.x, event.y)
+        else:
+            self._cfg["x"] = self.winfo_x()
+            self._cfg["y"] = self.winfo_y()
+            save_settings(self._cfg)
 
     def _handle_click(self, x, y):
         cx = cy = self._cx
@@ -540,11 +556,17 @@ class RotorApp(tk.Tk):
         menu.add_command(label="Settings…", command=self._open_settings)
         menu.add_command(label="Help / logging software setup", command=lambda: webbrowser.open(HELP_URL))
         menu.add_separator()
-        menu.add_command(label="Avsluta", command=self.destroy)
+        menu.add_command(label="Avsluta", command=self._on_close)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def _on_close(self):
+        self._cfg["x"] = self.winfo_x()
+        self._cfg["y"] = self.winfo_y()
+        save_settings(self._cfg)
+        self.destroy()
 
     # ── Target / stop ─────────────────────────────────────
 
