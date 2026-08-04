@@ -262,9 +262,10 @@ class SettingsDialog(tk.Toplevel):
 
     def _apply(self):
         host = self.e_host.get().strip()
+        udp_port_raw = self.e_udp_port.get().strip()
         try:
             port     = int(self.e_port.get().strip())
-            udp_port = int(self.e_udp_port.get().strip())
+            udp_port = int(udp_port_raw) if udp_port_raw != "?" else None
             min_size = SIZE_BY_MODE[self.ui_mode]["min"]
             size     = max(min_size, min(MAX_SIZE, int(self.e_size.get().strip())))
         except ValueError:
@@ -628,7 +629,7 @@ class RotorApp(tk.Tk):
     def _apply_settings(self, new_cfg, callback):
         host_changed = new_cfg["host"] != self._cfg["host"] or new_cfg["port"] != self._cfg["port"]
         ok = self.link.reconnect(new_cfg["host"], new_cfg["port"]) if host_changed else True
-        if new_cfg["udp_port"] != self.daemon_udp_port:
+        if new_cfg["udp_port"] is not None and new_cfg["udp_port"] != self.daemon_udp_port:
             self.link.set_udp_port(new_cfg["udp_port"])
         style_changed = new_cfg["ui_mode"] != self._cfg["ui_mode"]
         self._cfg = {k: v for k, v in new_cfg.items() if k != "udp_port"}
