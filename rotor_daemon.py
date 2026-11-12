@@ -290,6 +290,11 @@ class ClientHandler(socketserver.BaseRequestHandler):
             state.stop()
         elif cmd == "get_config":
             self.send_raw((json.dumps({"type": "config", "udp_port": cfg["udp_port"]}) + "\n").encode("utf-8"))
+        elif cmd == "suggest_target":
+            az = msg.get("az")
+            if isinstance(az, (int, float)):
+                log.info("Suggested target: %.0f (%s)", az, msg.get("call"))
+                state.broadcast({"type": "suggested_target", "value": az, "call": msg.get("call")})
         elif cmd == "set_udp_port":
             port = msg.get("port")
             if isinstance(port, int) and 1 <= port <= 65535:

@@ -312,6 +312,9 @@ class RotorApp(tk.Tk):
         self.lbl_n1mm = None
         self._n1mm_clear_job = None
         self.daemon_udp_port = None
+        self.suggested_az = None
+        self.suggested_call = None
+        self._suggest_clear_job = None
 
         self.link = DaemonLink(self._cfg["host"], self._cfg["port"], self._on_daemon_message)
 
@@ -334,6 +337,14 @@ class RotorApp(tk.Tk):
     def _radius(self): return int(self._canvas_size * 0.44)
     @property
     def _stop_r(self): return max(18, int(self._radius * self.STOP_R_FRAC))
+
+    def _suggest_btn_pos(self):
+        """(cx, btn_y, btn_r) för bekräfta-cirkeln under stop-cirkeln —
+        delad formel mellan ritning (_update_canvas) och klickträff
+        (_handle_click)."""
+        sr = self._stop_r
+        btn_r = max(14, int(sr * 0.85))
+        return self._cx, self._cy + sr + btn_r + 8, btn_r
 
     # ── Window chrome ─────────────────────────────────────
 
@@ -358,6 +369,17 @@ class RotorApp(tk.Tk):
                                      font=("Consolas", 9), anchor="w")
             self.lbl_n1mm.pack(side="left", padx=6, pady=3)
 
+            self.lbl_suggest = tk.Label(bar, text="", bg=BORDER, fg=AMBER,
+                                        font=("Consolas", 9), anchor="w")
+            self.lbl_suggest.pack(side="left", padx=6, pady=3)
+
+            self.btn_suggest_go = tk.Button(
+                bar, text="Sväng dit", bg=BORDER, fg=MUTED,
+                activebackground=BORDER, activeforeground=TEXT,
+                relief="flat", font=("Consolas", 9), cursor="hand2", bd=0,
+                state="disabled", command=self._confirm_suggested_target)
+            self.btn_suggest_go.pack(side="left", padx=(0, 6), pady=2)
+
             cfg_btn = tk.Button(bar, text="⚙", bg=BORDER, fg=MUTED,
                                 activebackground=BORDER, activeforeground=TEXT,
                                 relief="flat", font=("Consolas", 12),
@@ -367,6 +389,8 @@ class RotorApp(tk.Tk):
         else:
             self.lbl_conn = None
             self.lbl_n1mm = None
+            self.lbl_suggest = None
+            self.btn_suggest_go = None
 
         C = self._canvas_size
         self.canvas = tk.Canvas(self, width=C, height=C, bg=BG,
@@ -443,6 +467,10 @@ class RotorApp(tk.Tk):
         self.needle_actual    = None
         self.label_actual_deg = None
         self.label_target_deg = None
+        self.needle_suggest      = None
+        self.suggest_btn_circle  = None
+        self.suggest_btn_label   = None
+        self.suggest_call_label  = None
 
     # ── Dynamic drawing ───────────────────────────────────
 
@@ -468,7 +496,9 @@ class RotorApp(tk.Tk):
 
     def _update_canvas(self):
         for item in (self.needle_target, self.needle_actual,
-                     self.label_actual_deg, self.label_target_deg):
+                     self.label_actual_deg, self.label_target_deg,
+                     self.needle_suggest, self.suggest_btn_circle,
+                     self.suggest_btn_label, self.suggest_call_label):
             if item:
                 self.canvas.delete(item)
 
@@ -505,9 +535,36 @@ class RotorApp(tk.Tk):
                 text=f"→ {int(self.az_target)}°",
                 fill=AMBER, font=("Consolas", fsz_tgt))
 
+        # v1.0.x: JTAlert-dubbelklick FÖRESLÅR bara ("suggested_target",
+        # rotor_daemon suggest_target — svänger INTE rotorn). Egen nål +
+        # klickbar bekräfta-knapp, ritas direkt på kompassen så det syns i
+        # BÅDE classic och compact (compact har ingen bar/knapprad alls).
+        SUGGEST_COLOR = "#5fa8d3"
+        if self.suggested_az is not None:
+            rad = math.radians(self.suggested_az - 90)
+            L = R * 0.55
+            self.needle_suggest = self.canvas.create_line(
+                cx, cy, cx + math.cos(rad) * L, cy + math.sin(rad) * L,
+                fill=SUGGEST_COLOR, width=2, dash=(4, 3))
+
+        _, btn_y, btn_r = self._suggest_btn_pos()
+        if self.suggested_az is not None:
+            call_txt = self.suggested_call or "?"
+            self.suggest_call_label = self.canvas.create_text(
+                cx, btn_y - btn_r - 10, text=f"{call_txt} → {int(self.suggested_az)}°",
+                fill=SUGGEST_COLOR, font=("Consolas", max(8, R // 18)))
+            self.suggest_btn_circle = self.canvas.create_oval(
+                cx - btn_r, btn_y - btn_r, cx + btn_r, btn_y + btn_r,
+                fill="#16302a", outline=SUGGEST_COLOR, width=1)
+            self.suggest_btn_label = self.canvas.create_text(
+                cx, btn_y, text="✓", fill=SUGGEST_COLOR,
+                font=("Consolas", max(9, btn_r - 4), "bold"))
+
         self.canvas.tag_raise(self.stop_circle)
         self.canvas.tag_raise(self.stop_label)
-        for item in (self.label_actual_deg, self.label_target_deg):
+        for item in (self.label_actual_deg, self.label_target_deg,
+                     self.suggest_call_label, self.suggest_btn_circle,
+                     self.suggest_btn_label):
             if item:
                 self.canvas.tag_raise(item)
 
@@ -541,6 +598,11 @@ class RotorApp(tk.Tk):
 
     def _handle_click(self, x, y):
         cx = cy = self._cx
+        if self.suggested_az is not None:
+            bx, by, br = self._suggest_btn_pos()
+            if math.hypot(x - bx, y - by) <= br:
+                self._confirm_suggested_target()
+                return
         dist = math.hypot(x - cx, y - cy)
         if dist <= self._stop_r:
             self._stop()
@@ -580,6 +642,29 @@ class RotorApp(tk.Tk):
         self.link.stop()
         self._update_canvas()
 
+    def _confirm_suggested_target(self):
+        if self.suggested_az is None:
+            return
+        az = self.suggested_az
+        self._clear_suggested_target()
+        self._set_target(az)
+
+    def _dismiss_suggested_target(self):
+        """15s auto-avfärdning — förslaget försvinner av sig själv om det
+        varken bekräftas eller ersätts av ett nytt (Jonnys önskemål)."""
+        self._clear_suggested_target()
+        self._update_canvas()
+
+    def _clear_suggested_target(self):
+        if self._suggest_clear_job:
+            self.after_cancel(self._suggest_clear_job)
+            self._suggest_clear_job = None
+        self.suggested_az = None
+        self.suggested_call = None
+        if self.lbl_suggest is not None:
+            self.lbl_suggest.config(text="")
+            self.btn_suggest_go.config(state="disabled")
+
     # ── Daemon messages (called from reader thread) ───────
 
     def _on_daemon_message(self, msg):
@@ -612,6 +697,17 @@ class RotorApp(tk.Tk):
         elif t == "n1mm_stop":
             if self.lbl_n1mm is not None:
                 self.lbl_n1mm.config(text="N1MM: ---", fg=MUTED)
+        elif t == "suggested_target":
+            self.suggested_az = msg.get("value")
+            self.suggested_call = msg.get("call")
+            if self.lbl_suggest is not None:
+                call_txt = f"{self.suggested_call} " if self.suggested_call else ""
+                self.lbl_suggest.config(text=f"{call_txt}→ {int(self.suggested_az)}°")
+                self.btn_suggest_go.config(state="normal")
+            self._update_canvas()
+            if self._suggest_clear_job:
+                self.after_cancel(self._suggest_clear_job)
+            self._suggest_clear_job = self.after(15000, self._dismiss_suggested_target)
         elif t == "config":
             self.daemon_udp_port = msg.get("udp_port")
 
